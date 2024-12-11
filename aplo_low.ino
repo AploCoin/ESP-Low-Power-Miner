@@ -12,8 +12,8 @@
 
 // Contract details
 const char* rpcServer = "https://pub1.aplocoin.com"; // Replace with your RPC server
-const char* privateKey = "dfsfsdf"; // Replace with your private key
-const char* walletAddress = "fsdfsdf"; // Replace with your wallet address
+const char* privateKey = "fdsdfsdfsdf"; // Replace with your private key
+const char* walletAddress = "sdfsdfsdfsd"; // Replace with your wallet address
 const char* contractAddress = "0x0000000000000000000000000000000000001234"; // Replace with your contract address
 
 Web3 *web3;
@@ -166,6 +166,11 @@ void setup() {
     wifiManager.autoConnect("GAplo_Miner");
     web3 = new Web3(APLOCOIN_ID);
     Serial.println("Connected to WiFi");
+    if(psramInit()) {
+        Serial.println("PSRAM is correctly initialized");
+    } else {
+        Serial.println("PSRAM not available");
+    }
 }
 
 void loop() {
@@ -292,15 +297,32 @@ String keccak256(const String& input) {
 }
 
 // Function to sign the transaction
-String signTransaction(const String& transactionData, const char* privateKeyHex) {
-    // Step 1: Hash the transaction data
+String signTransaction(uint64_t nonce, long long int gasPrice, long long int gasLimit, const char* to, const char* from, const String& data, const char* privateKeyHex) {
+    // Step 1: Prepare the transaction fields
+    String nonceHex = padLeft(String(nonce, HEX), 64, '0'); // 32 bytes
+    String gasPriceHex = padLeft(String(gasPrice, HEX), 64, '0'); // 32 bytes
+    String gasLimitHex = padLeft(String(gasLimit, HEX), 64, '0'); // 32 bytes
+    String valueHex = "0x0"; // Value is 0 for contract calls
+    String toHex = to; // To address
+    String dataHex = data; // Data
+
+    // Step 2: Construct the transaction object
+    String transactionData = 
+        nonceHex + 
+        gasPriceHex + 
+        gasLimitHex + 
+        toHex + 
+        valueHex + 
+        dataHex;
+
+    // Step 3: Hash the transaction data
     String hashHex = keccak256(transactionData);
     
     // Convert hash from hex string to byte array
     uint8_t hash[SHA3_256_DIGEST_LENGTH];
     hexStringToByteArray(hashHex.c_str() + 2, hash, SHA3_256_DIGEST_LENGTH); // Skip "0x"
 
-    // Step 2: Prepare the signature buffer
+    // Step 4: Prepare the signature buffer
     uint8_t signature[64]; // ECDSA signature (r, s)
     uint8_t recoveryId; // Recovery ID
 
@@ -308,23 +330,25 @@ String signTransaction(const String& transactionData, const char* privateKeyHex)
     uint8_t privateKey[32]; // Private key should be 32 bytes
     hexStringToByteArray(privateKeyHex, privateKey, 32);
 
-    // Step 3: Sign the hash with the private key
+    // Step 5: Sign the hash with the private key
     if (ecdsa_sign_digest(curve, privateKey, hash, signature, &recoveryId, nullptr) != 0) {
         Serial.println("Failed to sign the transaction.");
         return "";
     }
 
-    // Step 4: Construct the raw transaction
-    String rawTransaction = transactionData + ",\"signature\":\"";
-    for (int i = 0; i < 32; i++) {
-        rawTransaction += String(signature[i], HEX);
-    }
-    for (int i = 0; i < 32; i++) {
-        rawTransaction += String(signature[i + 32], HEX);
-    }
-    rawTransaction += String(recoveryId, HEX) + "\""; // Append recovery ID
+    // Step 6: Construct the signed transaction
+    String signedTransaction = 
+        "0x" + nonceHex + 
+        gasPriceHex + 
+        gasLimitHex + 
+        toHex + 
+        valueHex + 
+        dataHex + 
+        String(signature[0], HEX) + 
+        String(signature[1], HEX) + 
+        String(recoveryId + 27, HEX); // Adjust recovery ID for Ethereum
 
-    return rawTransaction;
+    return signedTransaction;
 }
 
 String padLeft(const String& str, size_t length, char padChar) {
@@ -360,6 +384,11 @@ String encodeABI(const char* functionName, const String& nonceHex) {
 
     // Encode the parameters (in this case, just the nonce)
     String encodedParams = "0x" + padLeft(nonceHex.substring(2), 64, '0'); // Pad to 32 bytes (64 hex characters)
+
+    Serial.print("functionSelector: ");
+    Serial.println(functionSelector);
+    Serial.print("encodedParams: ");
+    Serial.println(encodedParams);
     
     // Combine the function selector and parameters
     return functionSelector + encodedParams;
@@ -389,19 +418,11 @@ string sendMineTransaction(uint64_t nonce) {
     Serial.print("Gas Estimate: ");
     Serial.println(gasEstimate);
 
-    // Construct the transaction data
-    String transactionData = "{\"to\":\"" + String(contractAddress) + 
-                             "\",\"from\":\"" + String(walletAddress) + 
-                             "\",\"data\":\"" + encodeABI("mine", nonceHex) + 
-                             "\",\"gas\":\"" + String(gasEstimate) + 
-                             "\",\"gasPrice\":\"" + String(gasPrice) + 
-                             "\",\"nonce\":\"" + String(latestNonce) + "\"}";
-
-    Serial.print("Transaction data: ");
-    Serial.println(transactionData);
+    // Construct the ABI encoded data
+    String data = encodeABI("mine", nonceHex);
 
     // Sign the transaction
-    String signedTx = signTransaction(transactionData, privateKey);
+    String signedTx = signTransaction(latestNonce, gasPrice, gasEstimate, contractAddress, walletAddress, data, privateKey);
     Serial.print("Signed Transaction: ");
     Serial.println(signedTx);
 
@@ -412,6 +433,8 @@ string sendMineTransaction(uint64_t nonce) {
     Serial.println(signedTxStdStr.c_str());
     const std::string* signedTxStdStrPtr = &signedTxStdStr;
     string txHash = web3->EthSendSignedTransaction(signedTxStdStrPtr, signedTx.length());
+    Serial.print("txHash: ");
+    Serial.println(txHash.c_str());
     return txHash;
 }
 
