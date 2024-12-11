@@ -2,6 +2,8 @@
 #include <WiFi.h>
 #include "Trezor/sha3.h"
 #include "Trezor/ecdsa.h"
+#include "Trezor/curves.h"
+#include "Trezor/secp256k1.h"
 #include <ArduinoJson.h>
 #include <stdint.h>
 #include <string>
@@ -10,8 +12,8 @@
 
 // Contract details
 const char* rpcServer = "https://pub1.aplocoin.com"; // Replace with your RPC server
-const char* privateKey = "fsdfsdfsd"; // Replace with your private key
-const char* walletAddress = "fsdfsdsdf"; // Replace with your wallet address
+const char* privateKey = "dfsfsdf"; // Replace with your private key
+const char* walletAddress = "fsdfsdf"; // Replace with your wallet address
 const char* contractAddress = "0x0000000000000000000000000000000000001234"; // Replace with your contract address
 
 Web3 *web3;
@@ -20,7 +22,7 @@ WiFiManager wifiManager;
 const uint64_t DEFAULT_DIFFICULTY = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 const uint64_t BLOCK_REWARD = 10000000000;
 
-const ecdsa_curve *secp256k1 = &secp256k1;
+const ecdsa_curve *curve = &secp256k1;
 
 // ABI for the smart contract
 const char* abi = R"(
@@ -161,11 +163,6 @@ MinerParams minerParams;
 
 void setup() {
     Serial.begin(115200);
-    /*WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(1000);
-        Serial.println("Connecting to WiFi...");
-    }*/
     wifiManager.autoConnect("GAplo_Miner");
     web3 = new Web3(APLOCOIN_ID);
     Serial.println("Connected to WiFi");
@@ -270,29 +267,6 @@ uint64_t mineBlock(MinerParams& params) {
         }
     }
 }
-/*
-string sendMineTransaction(uint64_t nonce) {
-    // Prepare transaction data
-    Serial.print("Nonce: ");
-    Serial.println(nonce);
-    String nonceHex = String(nonce, HEX);
-    Serial.print("NonceHex: ");
-    Serial.println(nonceHex);
-    // Manually construct the transaction data
-    String transactionData = "{\"to\":\"" + String(contractAddress) + "\",\"from\":\"" + String(walletAddress) + "\",\"data\":\"0x" + nonceHex + "\"}";
-    Serial.print("Transaction data: ");
-    Serial.println(transactionData);
-    const char* transactionDataCStr = transactionData.c_str();
-    const std::string transactionDataStdStr(transactionDataCStr);
-    Serial.print("Transaction data STD STR: ");
-    Serial.println(transactionDataStdStr.c_str());
-    const std::string* transactionDataStdStrPtr = &transactionDataStdStr;
-
-    // Send the transaction
-    string txHash = web3->EthSendSignedTransaction(transactionDataStdStrPtr, transactionData.length());
-    return txHash;
-}
-*/
 
 // Function to convert hex string to byte array
 void hexStringToByteArray(const char* hexString, uint8_t* byteArray, size_t byteArraySize) {
@@ -335,7 +309,7 @@ String signTransaction(const String& transactionData, const char* privateKeyHex)
     hexStringToByteArray(privateKeyHex, privateKey, 32);
 
     // Step 3: Sign the hash with the private key
-    if (ecdsa_sign_digest(&secp256k1, privateKey, hash, signature, &recoveryId, nullptr) != 0) {
+    if (ecdsa_sign_digest(curve, privateKey, hash, signature, &recoveryId, nullptr) != 0) {
         Serial.println("Failed to sign the transaction.");
         return "";
     }
@@ -351,6 +325,14 @@ String signTransaction(const String& transactionData, const char* privateKeyHex)
     rawTransaction += String(recoveryId, HEX) + "\""; // Append recovery ID
 
     return rawTransaction;
+}
+
+String padLeft(const String& str, size_t length, char padChar) {
+    String padded = str;
+    while (padded.length() < length) {
+        padded = padChar + padded; // Prepend the padding character
+    }
+    return padded;
 }
 
 // Function to encode ABI using the JSON ABI
@@ -377,8 +359,8 @@ String encodeABI(const char* functionName, const String& nonceHex) {
     }
 
     // Encode the parameters (in this case, just the nonce)
-    String encodedParams = "0x" + nonceHex.substring(2).padLeft(64, '0'); // Pad to 32 bytes (64 hex characters)
-
+    String encodedParams = "0x" + padLeft(nonceHex.substring(2), 64, '0'); // Pad to 32 bytes (64 hex characters)
+    
     // Combine the function selector and parameters
     return functionSelector + encodedParams;
 }
